@@ -3,118 +3,105 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>EPS Vidéo Différé V2</title>
+    <title>EPS Différé PRO</title>
     <style>
-        body { font-family: sans-serif; background: #000; color: #fff; margin: 0; overflow: hidden; text-align: center; }
-        #header { background: #222; padding: 10px; display: flex; justify-content: space-around; align-items: center; z-index: 100; position: relative;}
+        body { font-family: system-ui, sans-serif; background: #000; color: #fff; margin: 0; overflow: hidden; display: flex; flex-direction: column; height: 100vh; }
+        #menu { background: #222; padding: 15px; display: flex; justify-content: center; align-items: center; gap: 15px; border-bottom: 2px solid #444; }
+        .container { flex-grow: 1; position: relative; display: flex; justify-content: center; align-items: center; background: #111; }
         
-        .main-container { position: relative; width: 100vw; height: 80vh; background: #111; }
-        video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+        /* On affiche un Canvas au lieu d'une balise Video */
+        canvas { max-width: 100%; max-height: 100%; transform: scaleX(-1); background: #000; }
         
-        /* Petit retour direct pour vérification */
-        #livePreview { position: absolute; bottom: 10px; left: 10px; width: 150px; border: 2px solid white; border-radius: 8px; transform: scaleX(-1); }
-        
-        .controls { padding: 20px; }
-        button { padding: 15px 25px; font-size: 18px; border-radius: 10px; border: none; background: #27ae60; color: white; font-weight: bold; }
-        input[type="range"] { width: 60%; margin: 10px; }
-        .label { font-size: 1.2em; margin-bottom: 5px; }
+        button { padding: 12px 20px; font-size: 16px; border-radius: 8px; border: none; background: #27ae60; color: white; font-weight: bold; cursor: pointer; }
+        input[type="range"] { width: 150px; }
+        .info { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 5px; font-size: 12px; }
     </style>
 </head>
 <body>
 
-    <div id="header">
-        <div>Délai: <span id="delayVal">5</span>s</div>
-        <input type="range" id="delayRange" min="1" max="20" value="5">
+    <div id="menu">
+        <button id="btnStart">DÉMARRER CAMÉRA</button>
+        <div id="uiControls" style="display:none;">
+            <span>Délai : <b id="delayVal">5</b>s</span>
+            <input type="range" id="delayRange" min="1" max="20" value="5">
+        </div>
     </div>
 
-    <div class="main-container">
-        <video id="delayedVideo" autoplay playsinline muted></video>
-        <video id="livePreview" autoplay playsinline muted></video>
+    <div class="container">
+        <div class="info" id="status">En attente...</div>
+        <canvas id="displayCanvas"></canvas>
     </div>
 
-    <div class="controls">
-        <button id="startBtn">ACTIVER LA CAMÉRA</button>
-        <p id="status" style="color: #aaa; font-size: 0.8em;">Cliquez sur Activer pour démarrer</p>
-    </div>
+    <video id="hiddenVideo" autoplay playsinline muted style="display:none;"></video>
 
 <script>
-    const startBtn = document.getElementById('startBtn');
-    const delayedVideo = document.getElementById('delayedVideo');
-    const livePreview = document.getElementById('livePreview');
+    const btnStart = document.getElementById('btnStart');
+    const video = document.getElementById('hiddenVideo');
+    const canvas = document.getElementById('displayCanvas');
+    const ctx = canvas.getContext('2d');
     const delayRange = document.getElementById('delayRange');
     const delayVal = document.getElementById('delayVal');
-    const statusText = document.getElementById('status');
+    const status = document.getElementById('status');
 
-    let chunks = [];
-    let recorder;
-    let delay = 5;
+    let buffer = [];
+    let delayInSeconds = 5;
+    const fps = 20; // On capture 20 images par seconde (suffisant pour l'EPS)
 
-    delayRange.oninput = () => { delay = delayRange.value; delayVal.innerText = delay; };
-
-    startBtn.onclick = async () => {
+    btnStart.onclick = async () => {
         try {
-            // 1. Demander la caméra
             const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { 
-                    facingMode: "environment", 
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
-                }, 
+                video: { facingMode: "environment", width: 640, height: 480 }, 
                 audio: false 
             });
-
-            // 2. Afficher le direct tout de suite
-            livePreview.srcObject = stream;
-            statusText.innerText = "Caméra OK. Initialisation du différé...";
-            startBtn.style.display = 'none';
-
-            // 3. Détecter le format supporté (Crucial pour iOS)
-            let mimeType = 'video/webm;codecs=vp8';
-            if (!MediaRecorder.isTypeSupported(mimeType)) {
-                mimeType = 'video/mp4'; // Format Apple
-            }
-
-            // 4. Configurer le recorder
-            recorder = new MediaRecorder(stream, { mimeType });
+            video.srcObject = stream;
+            video.play();
             
-            recorder.ondataavailable = (e) => {
-                if (e.data.size > 0) {
-                    chunks.push(e.data);
-                    processBuffer();
-                }
+            btnStart.style.display = 'none';
+            document.getElementById('uiControls').style.display = 'block';
+            status.innerText = "Initialisation...";
+
+            // Ajuster la taille du canvas quand la vidéo commence
+            video.onloadedmetadata = () => {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                startLoop();
             };
-
-            // On enregistre par tranches de 500ms
-            recorder.start(500);
-
         } catch (err) {
-            alert("Erreur : " + err.message);
-            statusText.innerText = "Erreur d'accès caméra.";
+            alert("Erreur caméra : " + err.message);
         }
     };
 
-    function processBuffer() {
-        // On calcule combien de chunks on doit attendre
-        // Si on enregistre toutes les 0.5s, pour 5s il faut 10 chunks.
-        const requiredChunks = delay * 2;
+    delayRange.oninput = () => {
+        delayInSeconds = delayRange.value;
+        delayVal.innerText = delayInSeconds;
+    };
 
-        if (chunks.length >= requiredChunks) {
-            // On crée un "mini-film" avec les chunks accumulés
-            const blob = new Blob(chunks, { type: recorder.mimeType });
-            const url = URL.createObjectURL(blob);
+    function startLoop() {
+        setInterval(() => {
+            // 1. Capturer l'image actuelle de la caméra
+            // On crée un canvas temporaire pour stocker l'image
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = canvas.width;
+            tempCanvas.height = canvas.height;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
             
-            // Si la vidéo différée ne joue pas encore, on la lance
-            if (delayedVideo.paused) {
-                delayedVideo.src = url;
-                delayedVideo.play();
-                statusText.innerText = "MODE DIFFÉRÉ ACTIF";
+            // 2. Ajouter cette image au buffer
+            buffer.push(tempCanvas);
+
+            // 3. Calculer combien d'images on doit avoir en stock pour le délai
+            const requiredFrames = delayInSeconds * fps;
+
+            if (buffer.length > requiredFrames) {
+                // On récupère l'image la plus ancienne (celle d'il y a X secondes)
+                const frameToDisplay = buffer.shift();
+                // On l'affiche sur le canvas principal
+                ctx.drawImage(frameToDisplay, 0, 0);
+                status.innerText = "MODE DIFFÉRÉ ACTIF";
+            } else {
+                status.innerText = "Mise en mémoire : " + Math.round((buffer.length/requiredFrames)*100) + "%";
             }
-            
-            // Pour éviter de saturer la mémoire, on garde une marge
-            if (chunks.length > requiredChunks + 20) {
-                chunks.shift(); // Supprime le plus vieux chunk
-            }
-        }
+        }, 1000 / fps);
     }
 </script>
 </body>
