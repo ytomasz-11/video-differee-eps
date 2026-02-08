@@ -2,185 +2,120 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EPS - Analyse Différée</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>EPS Vidéo Différé V2</title>
     <style>
-        body {
-            font-family: sans-serif;
-            background-color: #1a1a1a;
-            color: white;
-            margin: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            height: 100vh;
-            overflow: hidden;
-        }
-        #controls {
-            background: rgba(0, 0, 0, 0.8);
-            padding: 15px;
-            width: 100%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 20px;
-            z-index: 10;
-        }
-        .video-container {
-            flex-grow: 1;
-            width: 100%;
-            position: relative;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background: #000;
-        }
-        video {
-            height: 100%;
-            width: 100%;
-            object-fit: contain;
-            transform: scaleX(-1); /* Effet miroir pour l'élève */
-        }
-        .badge {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background: red;
-            padding: 5px 10px;
-            border-radius: 5px;
-            font-weight: bold;
-        }
-        button {
-            padding: 10px 20px;
-            font-size: 16px;
-            cursor: pointer;
-            border-radius: 5px;
-            border: none;
-            background: #2ecc71;
-            color: white;
-        }
-        input[type="range"] { width: 150px; }
+        body { font-family: sans-serif; background: #000; color: #fff; margin: 0; overflow: hidden; text-align: center; }
+        #header { background: #222; padding: 10px; display: flex; justify-content: space-around; align-items: center; z-index: 100; position: relative;}
+        
+        .main-container { position: relative; width: 100vw; height: 80vh; background: #111; }
+        video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+        
+        /* Petit retour direct pour vérification */
+        #livePreview { position: absolute; bottom: 10px; left: 10px; width: 150px; border: 2px solid white; border-radius: 8px; transform: scaleX(-1); }
+        
+        .controls { padding: 20px; }
+        button { padding: 15px 25px; font-size: 18px; border-radius: 10px; border: none; background: #27ae60; color: white; font-weight: bold; }
+        input[type="range"] { width: 60%; margin: 10px; }
+        .label { font-size: 1.2em; margin-bottom: 5px; }
     </style>
 </head>
 <body>
 
-    <div id="controls">
-        <button id="startBtn">Démarrer Caméra</button>
-        <div>
-            Délai : <span id="delayVal">5</span>s
-            <input type="range" id="delayRange" min="1" max="30" value="5">
-        </div>
-        <div id="status">Statut : Prêt</div>
+    <div id="header">
+        <div>Délai: <span id="delayVal">5</span>s</div>
+        <input type="range" id="delayRange" min="1" max="20" value="5">
     </div>
 
-    <div class="video-container">
-        <div class="badge" id="modeBadge">FLUX DIFFÉRÉ</div>
+    <div class="main-container">
         <video id="delayedVideo" autoplay playsinline muted></video>
+        <video id="livePreview" autoplay playsinline muted></video>
     </div>
 
-    <script>
-        const startBtn = document.getElementById('startBtn');
-        const delayRange = document.getElementById('delayRange');
-        const delayVal = document.getElementById('delayVal');
-        const delayedVideo = document.getElementById('delayedVideo');
-        const statusText = document.getElementById('status');
+    <div class="controls">
+        <button id="startBtn">ACTIVER LA CAMÉRA</button>
+        <p id="status" style="color: #aaa; font-size: 0.8em;">Cliquez sur Activer pour démarrer</p>
+    </div>
 
-        let mediaRecorder;
-        let sourceBuffer = [];
-        let delay = 5;
-        let stream;
+<script>
+    const startBtn = document.getElementById('startBtn');
+    const delayedVideo = document.getElementById('delayedVideo');
+    const livePreview = document.getElementById('livePreview');
+    const delayRange = document.getElementById('delayRange');
+    const delayVal = document.getElementById('delayVal');
+    const statusText = document.getElementById('status');
 
-        delayRange.addEventListener('input', (e) => {
-            delay = e.target.value;
-            delayVal.innerText = delay;
-        });
+    let chunks = [];
+    let recorder;
+    let delay = 5;
 
-        async function startApp() {
-            try {
-                stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "environment", width: 1280, height: 720 }, 
-                    audio: false 
-                });
-                
-                statusText.innerText = "Statut : Mise en mémoire...";
-                startBtn.style.display = 'none';
+    delayRange.oninput = () => { delay = delayRange.value; delayVal.innerText = delay; };
 
-                // Configuration du MediaRecorder
-                mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm; codecs=vp8' });
-                
-                mediaRecorder.ondataavailable = (event) => {
-                    if (event.data.size > 0) {
-                        sourceBuffer.push(event.data);
-                        handlePlayback();
-                    }
-                };
+    startBtn.onclick = async () => {
+        try {
+            // 1. Demander la caméra
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    facingMode: "environment", 
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }, 
+                audio: false 
+            });
 
-                // On capture des segments de 100ms
-                mediaRecorder.start(100);
+            // 2. Afficher le direct tout de suite
+            livePreview.srcObject = stream;
+            statusText.innerText = "Caméra OK. Initialisation du différé...";
+            startBtn.style.display = 'none';
 
-            } catch (err) {
-                console.error("Erreur caméra:", err);
-                alert("Impossible d'accéder à la caméra. Vérifiez les permissions HTTPS.");
+            // 3. Détecter le format supporté (Crucial pour iOS)
+            let mimeType = 'video/webm;codecs=vp8';
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                mimeType = 'video/mp4'; // Format Apple
             }
-        }
 
-        function handlePlayback() {
-            // Calculer la durée totale accumulée en fonction du nombre de segments
-            // (10 segments = 1 seconde car on a mis 100ms dans start)
-            const requiredSegments = delay * 10;
-
-            if (sourceBuffer.length >= requiredSegments && delayedVideo.paused) {
-                statusText.innerText = "Statut : Diffusion en direct";
-                playNextSegment();
-            }
-        }
-
-        function playNextSegment() {
-            if (sourceBuffer.length > 0) {
-                const blob = sourceBuffer.shift();
-                const url = URL.createObjectURL(blob);
-                
-                // Petite astuce : on enchaîne les segments de façon fluide
-                const tempVideo = document.createElement('video');
-                // On pourrait utiliser MediaSource API pour plus de fluidité, 
-                // mais pour de l'EPS, le décalage de lecture simple suffit souvent.
-                
-                // Pour une version de production, on utiliserait un seul MediaSource.
-                // Ici, pour la simplicité, on utilise la source du flux vidéo.
-                if(!delayedVideo.src) {
-                   updateVideoSource();
-                }
-            }
-        }
-
-        // Version optimisée pour la fluidité via URL de Blob combinée
-        function updateVideoSource() {
-            setInterval(() => {
-                if (sourceBuffer.length > delay * 10) {
-                    const blob = new Blob(sourceBuffer.slice(0, 10), { type: 'video/webm' });
-                    // On ne garde que ce qui dépasse du délai pour ne pas saturer la RAM
-                    if (sourceBuffer.length > (delay * 10) + 50) {
-                        sourceBuffer.shift(); 
-                    }
-                }
-            }, 100);
+            // 4. Configurer le recorder
+            recorder = new MediaRecorder(stream, { mimeType });
             
-            // Note : La gestion précise du buffering en JS pur sans serveur 
-            // nécessite idéalement l'API MediaSource pour éviter les micro-coupures.
-        }
+            recorder.ondataavailable = (e) => {
+                if (e.data.size > 0) {
+                    chunks.push(e.data);
+                    processBuffer();
+                }
+            };
 
-        // Approche simplifiée alternative (plus robuste pour tablettes)
-        // Utilisation d'un décalage de lecture natif si le navigateur le permet
-        async function startSimpleDelay() {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            delayedVideo.srcObject = stream;
+            // On enregistre par tranches de 500ms
+            recorder.start(500);
+
+        } catch (err) {
+            alert("Erreur : " + err.message);
+            statusText.innerText = "Erreur d'accès caméra.";
+        }
+    };
+
+    function processBuffer() {
+        // On calcule combien de chunks on doit attendre
+        // Si on enregistre toutes les 0.5s, pour 5s il faut 10 chunks.
+        const requiredChunks = delay * 2;
+
+        if (chunks.length >= requiredChunks) {
+            // On crée un "mini-film" avec les chunks accumulés
+            const blob = new Blob(chunks, { type: recorder.mimeType });
+            const url = URL.createObjectURL(blob);
             
-            // On attend que la vidéo soit prête, puis on applique un "pause" artificiel
-            // Mais la meilleure méthode reste le buffer de Blobs.
+            // Si la vidéo différée ne joue pas encore, on la lance
+            if (delayedVideo.paused) {
+                delayedVideo.src = url;
+                delayedVideo.play();
+                statusText.innerText = "MODE DIFFÉRÉ ACTIF";
+            }
+            
+            // Pour éviter de saturer la mémoire, on garde une marge
+            if (chunks.length > requiredChunks + 20) {
+                chunks.shift(); // Supprime le plus vieux chunk
+            }
         }
-
-        startBtn.addEventListener('click', startApp);
-
-    </script>
+    }
+</script>
 </body>
 </html>
